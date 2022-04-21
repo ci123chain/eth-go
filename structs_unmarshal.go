@@ -234,6 +234,47 @@ func (t *Transaction) unmarshalJSON(v *fastjson.Value) error {
 		}
 	}
 
+	if v.Exists("contractAddress") {
+		if v.Get("contractAddress").String() != "null" {
+			var ContractAddress Address
+			if err = decodeAddr(&ContractAddress, v, "contractAddress"); err != nil {
+				return err
+			}
+			t.ContractAddress = &ContractAddress
+		}
+		if t.Status, err = decodeUint8(v, "status"); err != nil {
+			return err
+		}
+
+		elems := v.GetArray("logs")
+		if len(elems) != 0 {
+			// structs (full block)
+			for _, elem := range elems {
+				log := new(Log)
+				if err := log.unmarshalJSON(elem); err != nil {
+					panic(err)
+				}
+				t.Logs = append(t.Logs, log)
+			}
+		}
+	}
+
+	if t.Status, err = decodeUint8(v, "status"); err != nil {
+		return err
+	}
+
+	elems := v.GetArray("logs")
+	if len(elems) != 0 {
+		// structs (full block)
+		for _, elem := range elems {
+			log := new(Log)
+			if err := log.unmarshalJSON(elem); err != nil {
+				panic(err)
+			}
+			t.Logs = append(t.Logs, log)
+		}
+	}
+
 	return nil
 }
 
@@ -541,6 +582,10 @@ func decodeBytes(dst []byte, v *fastjson.Value, key string, bits ...int) ([]byte
 	str := vv.String()
 	str = strings.Trim(str, "\"")
 
+	if str == "" {
+		return nil, nil
+	}
+
 	if !strings.HasPrefix(str, "0x") {
 		return nil, fmt.Errorf("field '%s' does not have 0x prefix: '%s'", key, str)
 	}
@@ -580,6 +625,25 @@ func decodeUint(v *fastjson.Value, key string) (uint64, error) {
 		return 0, fmt.Errorf("field '%s' failed to decode uint: %s", key, str)
 	}
 	return num, nil
+}
+
+func decodeUint8(v *fastjson.Value, key string) (uint8, error) {
+	vv := v.Get(key)
+	if vv == nil {
+		return 0, fmt.Errorf("field '%s' not found", key)
+	}
+	str := vv.String()
+	str = strings.Trim(str, "\"")
+
+	if str == "" {
+		str = "0"
+	}
+
+	num, err := strconv.ParseUint(str, 10, 8)
+	if err != nil {
+		return 0, fmt.Errorf("field '%s' failed to decode uint: %s", key, str)
+	}
+	return uint8(num), nil
 }
 
 func decodeInt64(v *fastjson.Value, key string) (int64, error) {
@@ -648,7 +712,7 @@ func unmarshalTextByte(dst, src []byte, size int) error {
 
 	str = strings.Trim(str, "\"")
 	if !strings.HasPrefix(str, "0x") {
-		return fmt.Errorf("0x prefix not found")
+		str = "0x" + str
 	}
 	str = str[2:]
 	b, err := hex.DecodeString(str)

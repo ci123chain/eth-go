@@ -188,6 +188,11 @@ type Transaction struct {
 	R        []byte
 	S        []byte
 
+	//Weelink values
+	ContractAddress *Address
+	Status uint8
+	Logs []*Log
+
 	// jsonrpc values
 	BlockHash   Hash
 	BlockNumber uint64

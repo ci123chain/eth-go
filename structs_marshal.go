@@ -13,7 +13,13 @@ var defaultArena fastjson.ArenaPool
 // MarshalJSON implements the marshal interface
 func (l *Log) MarshalJSON() ([]byte, error) {
 	a := defaultArena.Get()
+	v := l.marshalJSON(a)
+	res := v.MarshalTo(nil)
+	defaultArena.Put(a)
+	return res, nil
+}
 
+func (l *Log) marshalJSON(a *fastjson.Arena) *fastjson.Value {
 	o := a.NewObject()
 	if l.Removed {
 		o.Set("removed", a.NewTrue())
@@ -33,11 +39,9 @@ func (l *Log) MarshalJSON() ([]byte, error) {
 		vv.SetArrayItem(indx, a.NewString(topic.String()))
 	}
 	o.Set("topics", vv)
-
-	res := o.MarshalTo(nil)
-	defaultArena.Put(a)
-	return res, nil
+	return o
 }
+
 
 // MarshalJSON implements the marshal interface
 func (t *Block) MarshalJSON() ([]byte, error) {
@@ -154,6 +158,20 @@ func (t *Transaction) marshalJSON(a *fastjson.Arena) *fastjson.Value {
 	}
 	if t.AccessList != nil {
 		o.Set("accessList", t.AccessList.marshalJSON(a))
+	}
+
+	if t.ContractAddress == nil {
+		o.Set("contractAddress", a.NewNull())
+	} else {
+		o.Set("contractAddress", a.NewString(t.ContractAddress.String()))
+	}
+	o.Set("status", a.NewNumberInt(int(t.Status)))
+	if len(t.Logs) != 0 {
+		txns := a.NewArray()
+		for indx, log := range t.Logs {
+			txns.SetArrayItem(indx, log.marshalJSON(a))
+		}
+		o.Set("logs", txns)
 	}
 	return o
 }
