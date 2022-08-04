@@ -14,11 +14,12 @@ import (
 // Provider handles the interactions with the Ethereum 1x node
 type Provider interface {
 	Call(ethgo.Address, []byte, *CallOpts) ([]byte, error)
-	Txn(ethgo.Address, ethgo.Key, []byte, *TxnOpts) (Txn, error)
+	Txn(ethgo.Address, ethgo.Key, []byte) (Txn, error)
 }
 
 type jsonRPCNodeProvider struct {
-	client *jsonrpc.Eth
+	client  *jsonrpc.Eth
+	eip1559 bool
 }
 
 func (j *jsonRPCNodeProvider) Call(addr ethgo.Address, input []byte, opts *CallOpts) ([]byte, error) {
@@ -40,99 +41,127 @@ func (j *jsonRPCNodeProvider) Call(addr ethgo.Address, input []byte, opts *CallO
 	return raw, nil
 }
 
-func (j *jsonRPCNodeProvider) Txn(addr ethgo.Address, key ethgo.Key, input []byte, opts *TxnOpts) (Txn, error) {
-	var err error
-
-	from := key.Address()
-
-	// estimate gas price
-	if opts.GasPrice == 0 {
-		opts.GasPrice, err = j.client.GasPrice()
-		if err != nil {
-			return nil, err
-		}
-	}
-	// estimate gas limit
-	if opts.GasLimit == 0 {
-		msg := &ethgo.CallMsg{
-			From:     from,
-			To:       nil,
-			Data:     input,
-			Value:    opts.Value,
-			GasPrice: opts.GasPrice,
-		}
-		if addr != ethgo.ZeroAddress {
-			msg.To = &addr
-		}
-		opts.GasLimit, err = j.client.EstimateGas(msg)
-		if err != nil {
-			return nil, err
-		}
-	}
-	// calculate the nonce
-	if opts.Nonce == 0 {
-		opts.Nonce, err = j.client.GetNonce(from, ethgo.Latest)
-		if err != nil {
-			return nil, fmt.Errorf("failed to calculate nonce: %v", err)
-		}
-	}
-
-	chainID, err := j.client.ChainID()
-	if err != nil {
-		return nil, err
-	}
-
-	// send transaction
-	rawTxn := &ethgo.Transaction{
-		From:     from,
-		Input:    input,
-		GasPrice: opts.GasPrice,
-		Gas:      opts.GasLimit,
-		Value:    opts.Value,
-		Nonce:    opts.Nonce,
-	}
-	if addr != ethgo.ZeroAddress {
-		rawTxn.To = &addr
-	}
-
-	signer := wallet.NewEIP155Signer(chainID.Uint64())
-	signedTxn, err := signer.SignTx(rawTxn, key)
-	if err != nil {
-		return nil, err
-	}
-	txnRaw, err := signedTxn.MarshalRLPTo(nil)
-	if err != nil {
-		return nil, err
-	}
-
+func (j *jsonRPCNodeProvider) Txn(addr ethgo.Address, key ethgo.Key, input []byte) (Txn, error) {
 	txn := &jsonrpcTransaction{
-		txn:    signedTxn,
-		txnRaw: txnRaw,
-		client: j.client,
+		opts:    &TxnOpts{},
+		input:   input,
+		client:  j.client,
+		key:     key,
+		to:      addr,
+		eip1559: j.eip1559,
 	}
 	return txn, nil
 }
 
 type jsonrpcTransaction struct {
-	hash   ethgo.Hash
-	client *jsonrpc.Eth
-	txn    *ethgo.Transaction
-	txnRaw []byte
+	to      ethgo.Address
+	input   []byte
+	hash    ethgo.Hash
+	opts    *TxnOpts
+	key     ethgo.Key
+	client  *jsonrpc.Eth
+	txn     *ethgo.Transaction
+	txnRaw  []byte
+	eip1559 bool
 }
 
 func (j *jsonrpcTransaction) Hash() ethgo.Hash {
 	return j.hash
 }
 
-func (j *jsonrpcTransaction) EstimatedGas() uint64 {
-	return j.txn.Gas
+func (j *jsonrpcTransaction) WithOpts(opts *TxnOpts) {
+	j.opts = opts
 }
 
-func (j *jsonrpcTransaction) GasPrice() uint64 {
-	return j.txn.GasPrice
+func (j *jsonrpcTransaction) Build() error {
+	var err error
+	from := j.key.Address()
+
+	// estimate gas price
+	if j.opts.GasPrice == 0 && !j.eip1559 {
+		j.opts.GasPrice, err = j.client.GasPrice()
+		if err != nil {
+			return err
+		}
+	}
+	// estimate gas limit
+	if j.opts.GasLimit == 0 {
+		msg := &ethgo.CallMsg{
+			From:     from,
+			To:       nil,
+			Data:     j.input,
+			Value:    j.opts.Value,
+			GasPrice: j.opts.GasPrice,
+		}
+		if j.to != ethgo.ZeroAddress {
+			msg.To = &j.to
+		}
+		j.opts.GasLimit, err = j.client.EstimateGas(msg)
+		if err != nil {
+			return err
+		}
+	}
+	// calculate the nonce
+	if j.opts.Nonce == 0 {
+		j.opts.Nonce, err = j.client.GetNonce(from, ethgo.Latest)
+		if err != nil {
+			return fmt.Errorf("failed to calculate nonce: %v", err)
+		}
+	}
+
+	chainID, err := j.client.ChainID()
+	if err != nil {
+		return err
+	}
+
+	// send transaction
+	rawTxn := &ethgo.Transaction{
+		From:     from,
+		Input:    j.input,
+		GasPrice: j.opts.GasPrice,
+		Gas:      j.opts.GasLimit,
+		Value:    j.opts.Value,
+		Nonce:    j.opts.Nonce,
+		ChainID:  chainID,
+	}
+	if j.to != ethgo.ZeroAddress {
+		rawTxn.To = &j.to
+	}
+
+	if j.eip1559 {
+		rawTxn.Type = ethgo.TransactionDynamicFee
+
+		// use gas price as fee data
+		gasPrice, err := j.client.GasPrice()
+		if err != nil {
+			return err
+		}
+		rawTxn.MaxFeePerGas = new(big.Int).SetUint64(gasPrice)
+		rawTxn.MaxPriorityFeePerGas = new(big.Int).SetUint64(gasPrice)
+	}
+
+	j.txn = rawTxn
+	return nil
 }
 
 func (j *jsonrpcTransaction) Do() error {
+	if j.txn == nil {
+		if err := j.Build(); err != nil {
+			return err
+		}
+	}
+
+	signer := wallet.NewEIP155Signer(j.txn.ChainID.Uint64())
+	signedTxn, err := signer.SignTx(j.txn, j.key)
+	if err != nil {
+		return err
+	}
+	txnRaw, err := signedTxn.MarshalRLPTo(nil)
+	if err != nil {
+		return err
+	}
+
+	j.txnRaw = txnRaw
 	hash, err := j.client.SendRawTransaction(j.txnRaw)
 	if err != nil {
 		return err
@@ -162,8 +191,7 @@ func (j *jsonrpcTransaction) Wait() (*ethgo.Receipt, error) {
 // Txn is the transaction object returned
 type Txn interface {
 	Hash() ethgo.Hash
-	EstimatedGas() uint64
-	GasPrice() uint64
+	WithOpts(opts *TxnOpts)
 	Do() error
 	Wait() (*ethgo.Receipt, error)
 }
@@ -173,6 +201,7 @@ type Opts struct {
 	JsonRPCClient   *jsonrpc.Eth
 	Provider        Provider
 	Sender          ethgo.Key
+	EIP1559         bool
 }
 
 type ContractOption func(*Opts)
@@ -201,6 +230,12 @@ func WithSender(sender ethgo.Key) ContractOption {
 	}
 }
 
+func WithEIP1559() ContractOption {
+	return func(o *Opts) {
+		o.EIP1559 = true
+	}
+}
+
 func DeployContract(abi *abi.ABI, bin []byte, args []interface{}, opts ...ContractOption) (Txn, error) {
 	a := NewContract(ethgo.Address{}, abi, opts...)
 	a.bin = bin
@@ -219,10 +254,10 @@ func NewContract(addr ethgo.Address, abi *abi.ABI, opts ...ContractOption) *Cont
 	if opt.Provider != nil {
 		provider = opt.Provider
 	} else if opt.JsonRPCClient != nil {
-		provider = &jsonRPCNodeProvider{client: opt.JsonRPCClient}
+		provider = &jsonRPCNodeProvider{client: opt.JsonRPCClient, eip1559: opt.EIP1559}
 	} else {
 		client, _ := jsonrpc.NewClient(opt.JsonRPCEndpoint)
-		provider = &jsonRPCNodeProvider{client: client.Eth()}
+		provider = &jsonRPCNodeProvider{client: client.Eth(), eip1559: opt.EIP1559}
 	}
 
 	a := &Contract{
@@ -289,7 +324,7 @@ func (a *Contract) Txn(method string, args ...interface{}) (Txn, error) {
 		}
 	}
 
-	txn, err := a.provider.Txn(a.addr, a.key, input, &TxnOpts{})
+	txn, err := a.provider.Txn(a.addr, a.key, input)
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +348,7 @@ func (a *Contract) Call(method string, block ethgo.BlockNumber, args ...interfac
 	}
 
 	opts := &CallOpts{
-		Block: ethgo.Latest,
+		Block: block,
 	}
 	if a.key != nil {
 		opts.From = a.key.Address()

@@ -21,9 +21,9 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
-const (
-	DefaultGasPrice = 1879048192 // 0x70000000
-	DefaultGasLimit = 5242880    // 0x500000
+var (
+	DefaultGasPrice = uint64(1879048192) // 0x70000000
+	DefaultGasLimit = uint64(5242880)    // 0x500000
 )
 
 var (
@@ -109,9 +109,12 @@ func NewTestServer(t *testing.T, cb ServerConfigCallback) *TestServer {
 	// enable ws
 	args = append(args, "--ws", "--ws.addr", "0.0.0.0")
 
+	// enable debug verbosity
+	args = append(args, "--verbosity", "4")
+
 	opts := &dockertest.RunOptions{
 		Repository: "ethereum/client-go",
-		Tag:        "v1.9.25",
+		Tag:        "v1.10.15",
 		Cmd:        args,
 		Mounts: []string{
 			tmpDir + ":/eth1data",
@@ -202,6 +205,10 @@ func (t *TestServer) Call(msg *ethgo.CallMsg) (string, error) {
 	return resp, nil
 }
 
+func (t *TestServer) Fund(address ethgo.Address) *ethgo.Receipt {
+	return t.Transfer(address, big.NewInt(1000000000000000000))
+}
+
 func (t *TestServer) Transfer(address ethgo.Address, value *big.Int) *ethgo.Receipt {
 	receipt, err := t.SendTxn(&ethgo.Transaction{
 		From:  t.accounts[0],
@@ -264,7 +271,7 @@ func (t *TestServer) WaitForReceipt(hash ethgo.Hash) (*ethgo.Receipt, error) {
 		if count > 100 {
 			return nil, fmt.Errorf("timeout")
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 		count++
 	}
 	return receipt, nil
@@ -289,15 +296,6 @@ func (t *TestServer) DeployContract(c *Contract) (*compiler.Artifact, ethgo.Addr
 		panic(err)
 	}
 	return solcContract, receipt.ContractAddress
-}
-
-func (t *TestServer) testHTTPEndpoint() bool {
-	resp, err := http.Post(t.HTTPAddr(), "application/json", nil)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	return true
 }
 
 func (t *TestServer) exit(err error) {

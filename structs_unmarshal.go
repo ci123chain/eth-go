@@ -143,11 +143,6 @@ func (t *Transaction) unmarshalJSON(v *fastjson.Value) error {
 	}
 	t.Type = typ
 
-	// 'to' must exists
-	if err := exists("to"); err != nil {
-		return err
-	}
-
 	var err error
 	if err := decodeHash(&t.Hash, v, "hash"); err != nil {
 		return err
@@ -169,12 +164,15 @@ func (t *Transaction) unmarshalJSON(v *fastjson.Value) error {
 	}
 
 	{
-		if v.Get("to").String() != "null" {
-			var to Address
-			if err = decodeAddr(&to, v, "to"); err != nil {
-				return err
+		// Do not decode 'to' if it doesn't exist.
+		if err := exists("to"); err == nil {
+			if v.Get("to").String() != "null" {
+				var to Address
+				if err = decodeAddr(&to, v, "to"); err != nil {
+					return err
+				}
+				t.To = &to
 			}
-			t.To = &to
 		}
 	}
 
@@ -199,15 +197,15 @@ func (t *Transaction) unmarshalJSON(v *fastjson.Value) error {
 		}
 	}
 
+	if t.Gas, err = decodeUint(v, "gas"); err != nil {
+		return err
+	}
+
 	if typ == TransactionDynamicFee {
 		if t.MaxPriorityFeePerGas, err = decodeBigInt(t.MaxPriorityFeePerGas, v, "maxPriorityFeePerGas"); err != nil {
 			return err
 		}
 		if t.MaxFeePerGas, err = decodeBigInt(t.MaxFeePerGas, v, "maxFeePerGas"); err != nil {
-			return err
-		}
-	} else {
-		if t.Gas, err = decodeUint(v, "gas"); err != nil {
 			return err
 		}
 	}

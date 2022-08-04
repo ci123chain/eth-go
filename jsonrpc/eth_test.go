@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/umbracle/ethgo"
 	"github.com/umbracle/ethgo/testutil"
+	"github.com/umbracle/ethgo/wallet"
 )
 
 var (
@@ -77,25 +78,28 @@ func TestEthGetBalance(t *testing.T) {
 	before, err := c.Eth().GetBalance(s.Account(0), ethgo.Latest)
 	assert.NoError(t, err)
 
+	key, err := wallet.GenerateKey()
+	assert.NoError(t, err)
+
+	sender := s.Account(0).Address()
+	receiver := key.Address()
+
 	amount := big.NewInt(10)
 	txn := &ethgo.Transaction{
-		From:  s.Account(0),
-		To:    &testutil.DummyAddr,
+		From:  sender,
+		To:    &receiver,
 		Value: amount,
 	}
 	receipt, err := s.SendTxn(txn)
 	assert.NoError(t, err)
 
-	after, err := c.Eth().GetBalance(s.Account(0), ethgo.Latest)
+	senderBalance, err := c.Eth().GetBalance(sender, ethgo.Latest)
 	assert.NoError(t, err)
+	assert.NotEqual(t, senderBalance, before)
 
-	// the balance in 'after' must be 'before' - 'amount'
-	assert.Equal(t, new(big.Int).Add(after, amount).Cmp(before), 0)
-
-	// get balance at block 0
-	before2, err := c.Eth().GetBalance(s.Account(0), ethgo.BlockNumber(0))
+	receiverBalance, err := c.Eth().GetBalance(receiver, ethgo.Latest)
 	assert.NoError(t, err)
-	assert.Equal(t, before, before2)
+	assert.Equal(t, receiverBalance, amount)
 
 	{
 		// query the balance with different options
@@ -107,7 +111,7 @@ func TestEthGetBalance(t *testing.T) {
 		for _, ca := range cases {
 			res, err := c.Eth().GetBalance(s.Account(0), ca)
 			assert.NoError(t, err)
-			assert.Equal(t, res, after)
+			assert.Equal(t, res, senderBalance)
 		}
 	}
 }
@@ -362,4 +366,18 @@ func TestEthGetStorageAt(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, strings.HasSuffix(res.String(), "a"))
 	}
+}
+
+func TestEthFeeHistory(t *testing.T) {
+	c, _ := NewClient(testutil.TestInfuraEndpoint(t))
+
+	lastBlock, err := c.Eth().BlockNumber()
+	assert.NoError(t, err)
+
+	from := ethgo.BlockNumber(lastBlock - 2)
+	to := ethgo.BlockNumber(lastBlock)
+
+	fee, err := c.Eth().FeeHistory(from, to)
+	assert.NoError(t, err)
+	assert.NotNil(t, fee)
 }

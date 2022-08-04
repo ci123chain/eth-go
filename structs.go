@@ -233,8 +233,8 @@ func (t *Transaction) Copy() *Transaction {
 }
 
 type AccessEntry struct {
-	Address Address
-	Storage []Hash
+	Address Address `json:"address"`
+	Storage []Hash  `json:"storageKeys"`
 }
 
 type AccessList []AccessEntry
