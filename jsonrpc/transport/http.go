@@ -1,23 +1,25 @@
 package transport
 
 import (
+	"bytes"
 	"encoding/json"
+	"io/ioutil"
+	"net/http"
 
 	"github.com/umbracle/ethgo/jsonrpc/codec"
-	"github.com/valyala/fasthttp"
 )
 
 // HTTP is an http transport
 type HTTP struct {
 	addr    string
-	client  *fasthttp.Client
+	client *http.Client
 	headers map[string]string
 }
 
 func newHTTP(addr string, headers map[string]string) *HTTP {
 	return &HTTP{
 		addr:    addr,
-		client:  &fasthttp.Client{},
+		client: &http.Client{},
 		headers: headers,
 	}
 }
@@ -46,27 +48,29 @@ func (h *HTTP) Call(method string, out interface{}, params ...interface{}) error
 		return err
 	}
 
-	req := fasthttp.AcquireRequest()
-	res := fasthttp.AcquireResponse()
-
-	defer fasthttp.ReleaseRequest(req)
-	defer fasthttp.ReleaseResponse(res)
-
-	req.SetRequestURI(h.addr)
-	req.Header.SetMethod("POST")
-	req.Header.SetContentType("application/json")
-	for k, v := range h.headers {
-		req.Header.Add(k, v)
-	}
-	req.SetBody(raw)
-
-	if err := h.client.Do(req, res); err != nil {
+	req, err := http.NewRequest("POST", h.addr, bytes.NewReader(raw))
+	if err != nil {
 		return err
 	}
 
+	req.Header.Add("Content-Type", "application/json")
+	for k, v := range h.headers {
+		req.Header.Add(k, v)
+	}
+
+	res, err := h.client.Do(req)
+	if err != nil {
+		return err
+	}
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
 	// Decode json-rpc response
 	var response codec.Response
-	if err := json.Unmarshal(res.Body(), &response); err != nil {
+	if err := json.Unmarshal(body, &response); err != nil {
 		return err
 	}
 	if response.Error != nil {
@@ -81,5 +85,4 @@ func (h *HTTP) Call(method string, out interface{}, params ...interface{}) error
 
 // SetMaxConnsPerHost sets the maximum number of connections that can be established with a host
 func (h *HTTP) SetMaxConnsPerHost(count int) {
-	h.client.MaxConnsPerHost = count
 }
