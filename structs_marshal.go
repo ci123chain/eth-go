@@ -3,9 +3,8 @@ package ethgo
 import (
 	"encoding/hex"
 	"fmt"
-	"math/big"
-
 	"github.com/valyala/fastjson"
+	"math/big"
 )
 
 var defaultArena fastjson.ArenaPool
@@ -13,6 +12,7 @@ var defaultArena fastjson.ArenaPool
 // MarshalJSON implements the marshal interface
 func (l *Log) MarshalJSON() ([]byte, error) {
 	a := defaultArena.Get()
+	defer a.Reset()
 	v := l.marshalJSON(a)
 	res := v.MarshalTo(nil)
 	defaultArena.Put(a)
@@ -50,6 +50,7 @@ func (t *Block) MarshalJSON() ([]byte, error) {
 	}
 
 	a := defaultArena.Get()
+	defer a.Reset()
 
 	o := a.NewObject()
 	o.Set("number", a.NewString(fmt.Sprintf("0x%x", t.Number)))
@@ -99,6 +100,7 @@ func (t *Block) MarshalJSON() ([]byte, error) {
 // MarshalJSON implements the Marshal interface.
 func (t *Transaction) MarshalJSON() ([]byte, error) {
 	a := defaultArena.Get()
+	defer a.Reset()
 	v := t.marshalJSON(a)
 	res := v.MarshalTo(nil)
 	defaultArena.Put(a)
@@ -195,7 +197,7 @@ func (t *AccessList) marshalJSON(a *fastjson.Arena) *fastjson.Value {
 // MarshalJSON implements the Marshal interface.
 func (c *CallMsg) MarshalJSON() ([]byte, error) {
 	a := defaultArena.Get()
-
+	defer a.Reset()
 	o := a.NewObject()
 	o.Set("from", a.NewString(c.From.String()))
 	if c.To != nil {
@@ -222,7 +224,7 @@ func (c *CallMsg) MarshalJSON() ([]byte, error) {
 // MarshalJSON implements the Marshal interface.
 func (l *LogFilter) MarshalJSON() ([]byte, error) {
 	a := defaultArena.Get()
-
+	defer a.Reset()
 	o := a.NewObject()
 	if len(l.Address) == 1 {
 		o.Set("address", a.NewString(l.Address[0].String()))
