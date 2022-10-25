@@ -257,8 +257,12 @@ func (t *Transaction) unmarshalJSON(v *fastjson.Value) error {
 		}
 	}
 
-	if t.Status, err = decodeUint8(v, "status"); err != nil {
-		return err
+	if v.Exists("status") {
+		if t.Status, err = decodeUint8(v, "status"); err != nil {
+			return err
+		}
+	} else {
+		t.Status = 1
 	}
 
 	elems := v.GetArray("logs")
